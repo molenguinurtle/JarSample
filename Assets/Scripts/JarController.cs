@@ -19,13 +19,14 @@ public class JarController : MonoBehaviour
     // Configure mp4 output dir within inspector
     // NOTE: Local Folder should be a public variable in Editor [DONE]
     public string jsonFilePath = "";
-    private const float CAMERA_OFFSET_Z = -3f;
-    private const float CAMERA_OFFSET_X = -10f;
-    private const float CAMERA_OFFSET_Y = 5f;
-    [SerializeField] private Camera _theCamera; //Set in Inspector
+    [SerializeField] private Camera _theCamera;
     [SerializeField] private Animator _bananaManController, _robotKyleController;
     [SerializeField] private Transform _bananaTransform, _robotTransform;
+    private Dictionary<string, string> _currentlyPlayingAnimations = new Dictionary<string, string>();
     private string _currentJson;
+    private const string ROBOT_KYLE_STRING = "robot_kyle";
+    private const string BANANA_MAN_STRING = "banana_man";
+
     void Start()
     {
         if (!string.IsNullOrEmpty(jsonFilePath) && _theCamera != null)
@@ -42,8 +43,6 @@ public class JarController : MonoBehaviour
     {
         while (Directory.Exists(jsonFilePath))
         {
-            // Continuously monitors a local folder for new json files [DONE]
-            // Ingests said json files and deletes after ingestion [DONE]
             DirectoryInfo d = new DirectoryInfo(jsonFilePath);
 
             foreach (var file in d.GetFiles("*.json"))
@@ -65,11 +64,6 @@ public class JarController : MonoBehaviour
 
     private void JsonHandler(string theJson)
     {
-        // Camera focuses on character listed in the JSON
-        // Triggers animation state changes for character listed in the JSON between the two animations you chose[DONE]
-
-        //_bananaManController.SetTrigger();
-        //_bananaManController.ResetTrigger();
         JarJsonObj myJarObj = JsonUtility.FromJson<JarJsonObj>(theJson);
 
         if (myJarObj == null)
@@ -79,13 +73,17 @@ public class JarController : MonoBehaviour
         }
         switch (myJarObj.character)
         {
-            case "robot_kyle":
+            case ROBOT_KYLE_STRING:
+                StopCurrentlyPlayingAnimation(ROBOT_KYLE_STRING, _robotKyleController);
                 CameraHandler(_robotTransform);
-                _robotKyleController.SetTrigger(myJarObj.animation);
+                _robotKyleController.SetBool(myJarObj.animation, true);
+                TrackCurrentlyPlayingAnimation(ROBOT_KYLE_STRING, myJarObj.animation);
                 break;
-            case "banana_man":
+            case BANANA_MAN_STRING:
+                StopCurrentlyPlayingAnimation(BANANA_MAN_STRING, _bananaManController);
                 CameraHandler(_bananaTransform);
-                _bananaManController.SetTrigger(myJarObj.animation);
+                _bananaManController.SetBool(myJarObj.animation, true);
+                TrackCurrentlyPlayingAnimation(BANANA_MAN_STRING, myJarObj.animation);
                 break;
             default:
                 Debug.LogWarning($"The character name in the JarJsonObj does not match any character in the scene! Camera will not change and animations" +
@@ -96,20 +94,31 @@ public class JarController : MonoBehaviour
 
     private void CameraHandler(Transform cameraFocus)
     {
-         var focusPosition = cameraFocus.position;
-        // //var focusPosition = cameraFocus.localPosition;
+        var movPosition = cameraFocus.position;
         Transform camTransform = _theCamera.transform;
-        // Vector3 camLocalPos = camTransform.localPosition;
-        _theCamera.transform.LookAt(camTransform.position + cameraFocus.transform.rotation * -Vector3.forward,
-            camTransform.rotation * Vector3.up);
-        camTransform.position = new Vector3(focusPosition.x + CAMERA_OFFSET_X, focusPosition.y+ CAMERA_OFFSET_Y,
-            focusPosition.z + CAMERA_OFFSET_Z);
-        _theCamera.transform.LookAt(cameraFocus.localPosition);
+        camTransform.position = new Vector3(movPosition.x, movPosition.y,
+            movPosition.z);
+        camTransform.parent = cameraFocus;
+        camTransform.SetLocalPositionAndRotation(new Vector3(0,0), new Quaternion(0,0,0,0));
+        camTransform.parent = null;
+    }
 
-        // camLocalPos = new Vector3(camTransform.localPosition.x, camLocalPos.y + CAMERA_OFFSET_Y,
-        //     camLocalPos.z + CAMERA_OFFSET_Z);
-        // camTransform.localPosition = camLocalPos;
+    private void StopCurrentlyPlayingAnimation(string characterName, Animator theAnimator)
+    {
+        if (!_currentlyPlayingAnimations.TryGetValue(characterName, out var theTrigger)) return;
+        if (!string.IsNullOrEmpty(theTrigger))
+        {
+            theAnimator.SetBool(theTrigger, false);
+            _currentlyPlayingAnimations[characterName] = "";
+        }
+    }
 
+    private void TrackCurrentlyPlayingAnimation(string characterName, string animationName)
+    {
+        if (!_currentlyPlayingAnimations.TryAdd(characterName, animationName))
+        {
+            _currentlyPlayingAnimations[characterName] = animationName;
+        }
     }
 
 }
