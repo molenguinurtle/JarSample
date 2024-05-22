@@ -12,8 +12,9 @@ using UnityEngine.Serialization;
 
 public class JarController : MonoBehaviour
 {
+    #region Serializable Objects for Json
     
-    [System.Serializable]
+    [Serializable]
     public class JarJsonObj
     {
         public string character;
@@ -21,24 +22,44 @@ public class JarController : MonoBehaviour
         public JarEvent jarEvent;
     }
     
-    [System.Serializable]
+    [Serializable]
     public struct JarEvent
     {
         public EventType eventType;
         public bool startRecording;
+        public bool doMove;
+        public bool doRotate;
+        public MoveParams moveParams;
+        public RotateParams rotateParams;
+    }
+    
+    [Serializable]
+    public struct MoveParams
+    {
         public float movePosX;
         public float movePosY;
         public float movePosZ;
     }
     
-    [System.Serializable]
+    [Serializable]
+    public struct RotateParams
+    {
+        public float rotX;
+        public float rotY;
+        public float rotZ;
+    }
+    
+    [Serializable]
     public enum EventType
     {
         IgnoreEvent,
         MoveEvent,
         RecordEvent
     }
+    #endregion
 
+    #region Variables
+    
     public string jsonFilePath = "";
     public string recordingOutputPath = "";
     [SerializeField] private Camera _theCamera;
@@ -49,6 +70,8 @@ public class JarController : MonoBehaviour
     private RecorderController _theRecorder;
     private const string ROBOT_KYLE_STRING = "robot_kyle";
     private const string BANANA_MAN_STRING = "banana_man";
+    
+    #endregion
 
     void Start()
     {
@@ -62,6 +85,10 @@ public class JarController : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Ingests any new json file found at 'jsonFilePath' every 1 second. If a new file is found, saves the text, deletes the file, and sends the text to the JsonHandler.
+    /// </summary>
+    /// <returns></returns>
     private IEnumerator CheckForNewJson()
     {
         while (Directory.Exists(jsonFilePath))
@@ -85,6 +112,11 @@ public class JarController : MonoBehaviour
         yield return null;
     }
 
+    /// <summary>
+    /// Takes a given json string and tries to deserialize it to a JarJsonObj. If conversion is successful, runs behaviour on scene objects based on given JarJsonObj parameters.
+    /// Otherwise, it logs a warning about not being able to deserialize given json string
+    /// </summary>
+    /// <param name="theJson">The json string used for deserialization into a JarJsonObj</param>
     private void JsonHandler(string theJson)
     {
         JarJsonObj myJarObj;
@@ -104,42 +136,14 @@ public class JarController : MonoBehaviour
             Debug.LogWarning($"The JSON did not deserialize into a JarJsonObj. Please verify the formatting of JSON. The Json: {theJson}");
             return;
         }
-        // Add an event for moving characters around the scene [DONE]
-        // Add an event for starting/stopping a recording of the camera view to write to a local mp4 clip [DONE]
-        // Configure mp4 output dir within inspector [DONE]
         
-        //C'est la vie. Todo: We have a lot of repeated logic below. See if we can't consolidate these calls. Either use conditional (? :) or something else. Probably...
-        //  Todo 2: ...easier to maintain in the long run as well. Maybe group all the separate method calls under one big method call that just passes in the proper
-        //   Todo 3: ...params for all the things being called. (i.e., JarJsonEventHandler(transform blah, transform blahCam, string blahStr, etc.)
         switch (myJarObj.character)
         {
             case ROBOT_KYLE_STRING:
-                StopCurrentlyPlayingAnimation(ROBOT_KYLE_STRING, _robotKyleController);
-                if (myJarObj.jarEvent.eventType == EventType.MoveEvent)
-                {
-                    MoveCharacter(_robotTransform, myJarObj.jarEvent);
-                }
-                CameraHandler(_robotCamPoint);
-                _robotKyleController.SetBool(myJarObj.animation, true);
-                TrackCurrentlyPlayingAnimation(ROBOT_KYLE_STRING, myJarObj.animation);
-                if (myJarObj.jarEvent.eventType == EventType.RecordEvent)
-                {
-                    RecordEventHandler(myJarObj.jarEvent);
-                }
+                JarJsonEventHandler(myJarObj, _robotCamPoint, _robotTransform, _robotKyleController, ROBOT_KYLE_STRING);
                 break;
             case BANANA_MAN_STRING:
-                StopCurrentlyPlayingAnimation(BANANA_MAN_STRING, _bananaManController);
-                if (myJarObj.jarEvent.eventType == EventType.MoveEvent)
-                {
-                    MoveCharacter(_bananaTransform, myJarObj.jarEvent);
-                }
-                CameraHandler(_bananaCamPoint);
-                _bananaManController.SetBool(myJarObj.animation, true);
-                TrackCurrentlyPlayingAnimation(BANANA_MAN_STRING, myJarObj.animation);
-                if (myJarObj.jarEvent.eventType == EventType.RecordEvent)
-                {
-                    RecordEventHandler(myJarObj.jarEvent);
-                }
+                JarJsonEventHandler(myJarObj, _bananaCamPoint, _bananaTransform, _bananaManController, BANANA_MAN_STRING);
                 break;
             default:
                 Debug.LogWarning($"The character name in the JarJsonObj does not match any character in the scene! Camera will not change and animations" +
@@ -152,6 +156,38 @@ public class JarController : MonoBehaviour
 
     #region Helper Methods
 
+    /// <summary>
+    /// This method takes a given JarJsonObj and runs its given behaviours(events) on scene objects
+    /// </summary>
+    /// <param name="theJarJsonObj">The JarJsonObj that holds the event info.</param>
+    /// <param name="camPoint">The Transform the camera should use to focus on a given character.</param>
+    /// <param name="charTransform">The Transform of a given character. Used for movement.</param>
+    /// <param name="charAnim">The Animator component of a given character. Used for animation control.</param>
+    /// <param name="charName">The name of a given character. Used for animation tracking.</param>
+    private void JarJsonEventHandler(JarJsonObj theJarJsonObj, Transform camPoint, Transform charTransform,
+        Animator charAnim, string charName)
+    {
+        var myEvent = theJarJsonObj.jarEvent;
+        StopCurrentlyPlayingAnimation(charName, charAnim, theJarJsonObj.animation);
+        if (myEvent.eventType == EventType.MoveEvent)
+        {
+            MoveCharacter(charTransform, myEvent);
+        }
+        CameraHandler(camPoint);
+        charAnim.SetBool(theJarJsonObj.animation, true);
+        TrackCurrentlyPlayingAnimation(charName, theJarJsonObj.animation);
+#if UNITY_EDITOR
+        if (myEvent.eventType == EventType.RecordEvent)
+        {
+            RecordEventHandler(theJarJsonObj.jarEvent);
+        }
+#endif
+    }
+    
+    /// <summary>
+    /// Starts or Stops recording based on the given JarEvent
+    /// </summary>
+    /// <param name="jarEvent">The object that determines if we Start or Stop recording</param>
     private void RecordEventHandler(JarEvent jarEvent)
     {
         //If recorderController is null, we need to set one up
@@ -165,7 +201,7 @@ public class JarController : MonoBehaviour
         {
             if (jarEvent.startRecording)
             {
-                Debug.Log($"The recorder is already recording and a new jarEvent wants to Start Recording. Ignoring jarEvent. Event: {jarEvent.ToString()}");
+                Debug.Log($"The recorder is already recording and a new jarEvent wants to Start Recording. Ignoring jarEvent. Event: {_currentJson}");
             }
             else
             {
@@ -181,11 +217,14 @@ public class JarController : MonoBehaviour
             }
             else
             {
-                Debug.Log($"The recorder is already stopped and a new jarEvent wants to Stop Recording. Ignoring jarEvent. Event: {jarEvent.ToString()}");
+                Debug.Log($"The recorder is already stopped and a new jarEvent wants to Stop Recording. Ignoring jarEvent. Event: {_currentJson}");
             }
         }
     }
 
+    /// <summary>
+    /// Sets up a RecorderController we can use to record gameplay in the Editor
+    /// </summary>
     private void SetupRecorder()
     {
         var controllerSettings = ScriptableObject.CreateInstance<RecorderControllerSettings>();
@@ -208,7 +247,10 @@ public class JarController : MonoBehaviour
         };
      
         videoRecorder.AudioInputSettings.PreserveAudio = true;
-        videoRecorder.OutputFile = recordingOutputPath + "JarRecording_" + DateTime.Now.ToString("s");
+        if (Directory.Exists(recordingOutputPath))
+        {
+            videoRecorder.OutputFile = recordingOutputPath + "JarRecording_" + DateTime.Now.ToString("s");
+        }
         
         controllerSettings.AddRecorderSettings(videoRecorder);
         controllerSettings.SetRecordModeToManual();
@@ -216,11 +258,31 @@ public class JarController : MonoBehaviour
      
         RecorderOptions.VerboseMode = false;
     }
-    private void MoveCharacter(Transform charTransform, JarEvent moveParams)
+    
+    /// <summary>
+    /// Modifies the given Transform based on the parameters in a given JarEvent
+    /// </summary>
+    /// <param name="charTransform">The Transform to modify</param>
+    /// <param name="jarEvent">The JarEvent that holds the Transform modification parameters</param>
+    private void MoveCharacter(Transform charTransform, JarEvent jarEvent)
     {
-        //C'est la vie. Maybe add Rotation to this as well. Just add 3 more fields to JarEvent
-        charTransform.position = new Vector3(moveParams.movePosX, moveParams.movePosY, moveParams.movePosZ);
+        if (jarEvent.doMove)
+        {
+            charTransform.position = new Vector3(jarEvent.moveParams.movePosX, jarEvent.moveParams.movePosY, jarEvent.moveParams.movePosZ);
+        }
+        
+        if (jarEvent.doRotate)
+        {
+            var newRotation = charTransform.rotation;
+            newRotation.eulerAngles = new Vector3(jarEvent.rotateParams.rotX, jarEvent.rotateParams.rotY, jarEvent.rotateParams.rotZ);
+            charTransform.rotation = newRotation;
+        }
     }
+    
+    /// <summary>
+    /// Moves the Camera to the given Transform and aligns it so its local forward Vector is the same as the given Transform.
+    /// </summary>
+    /// <param name="cameraFocus">The Transform we're aligning the camera with.</param>
     private void CameraHandler(Transform cameraFocus)
     {
         var movPosition = cameraFocus.position;
@@ -232,16 +294,27 @@ public class JarController : MonoBehaviour
         camTransform.parent = null;
     }
 
-    private void StopCurrentlyPlayingAnimation(string characterName, Animator theAnimator)
+    /// <summary>
+    /// If the given character is currenly playing an animation, and the next animation we want to trigger isn't the same, this stops the current animation playing.
+    /// </summary>
+    /// <param name="characterName"></param>
+    /// <param name="theAnimator"></param>
+    /// <param name="tempNextBool"></param>
+    private void StopCurrentlyPlayingAnimation(string characterName, Animator theAnimator, string tempNextBool)
     {
-        if (!_currentlyPlayingAnimations.TryGetValue(characterName, out var theTrigger)) return;
-        if (!string.IsNullOrEmpty(theTrigger))
+        if (!_currentlyPlayingAnimations.TryGetValue(characterName, out var theBool) || theBool == tempNextBool) return;
+        if (!string.IsNullOrEmpty(theBool))
         {
-            theAnimator.SetBool(theTrigger, false);
+            theAnimator.SetBool(theBool, false);
             _currentlyPlayingAnimations[characterName] = "";
         }
     }
 
+    /// <summary>
+    /// Tracks which animation is currently playing on given character in the scene via a dictionary.
+    /// </summary>
+    /// <param name="characterName"></param>
+    /// <param name="animationName"></param>
     private void TrackCurrentlyPlayingAnimation(string characterName, string animationName)
     {
         if (!_currentlyPlayingAnimations.TryAdd(characterName, animationName))
