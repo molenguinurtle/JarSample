@@ -1,7 +1,12 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using UnityEditor;
 using UnityEditor.Animations;
+using UnityEditor.Recorder;
+using UnityEditor.Recorder.Encoder;
+using UnityEditor.Recorder.Input;
 using UnityEngine;
 using UnityEngine.Serialization;
 
@@ -35,11 +40,13 @@ public class JarController : MonoBehaviour
     }
 
     public string jsonFilePath = "";
+    public string recordingOutputPath = "";
     [SerializeField] private Camera _theCamera;
     [SerializeField] private Animator _bananaManController, _robotKyleController;
     [SerializeField] private Transform _bananaCamPoint, _robotCamPoint, _bananaTransform, _robotTransform;
     private Dictionary<string, string> _currentlyPlayingAnimations = new Dictionary<string, string>();
     private string _currentJson;
+    private RecorderController _theRecorder;
     private const string ROBOT_KYLE_STRING = "robot_kyle";
     private const string BANANA_MAN_STRING = "banana_man";
 
@@ -80,7 +87,17 @@ public class JarController : MonoBehaviour
 
     private void JsonHandler(string theJson)
     {
-        JarJsonObj myJarObj = JsonUtility.FromJson<JarJsonObj>(theJson);
+        JarJsonObj myJarObj;
+        try
+        {
+             myJarObj = JsonUtility.FromJson<JarJsonObj>(theJson);
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"The JSON threw an exception when trying to deserialize into a JarJsonObj. Please verify the formatting of JSON. " +
+                             $"The Json: {theJson}; The Exception: {e.Message}");
+            return;
+        }
 
         if (myJarObj == null)
         {
@@ -88,8 +105,8 @@ public class JarController : MonoBehaviour
             return;
         }
         // Add an event for moving characters around the scene [DONE]
-        // Add an event for starting/stopping a recording of the camera view to write to a local mp4 clip -
-        // Configure mp4 output dir within inspector
+        // Add an event for starting/stopping a recording of the camera view to write to a local mp4 clip [DONE]
+        // Configure mp4 output dir within inspector [DONE]
         
         //C'est la vie. Todo: We have a lot of repeated logic below. See if we can't consolidate these calls. Either use conditional (? :) or something else. Probably...
         //  Todo 2: ...easier to maintain in the long run as well. Maybe group all the separate method calls under one big method call that just passes in the proper
@@ -107,7 +124,7 @@ public class JarController : MonoBehaviour
                 TrackCurrentlyPlayingAnimation(ROBOT_KYLE_STRING, myJarObj.animation);
                 if (myJarObj.jarEvent.eventType == EventType.RecordEvent)
                 {
-                    //C'est la vie. Function for start/stopping camera recording goes here.
+                    RecordEventHandler(myJarObj.jarEvent);
                 }
                 break;
             case BANANA_MAN_STRING:
@@ -121,7 +138,7 @@ public class JarController : MonoBehaviour
                 TrackCurrentlyPlayingAnimation(BANANA_MAN_STRING, myJarObj.animation);
                 if (myJarObj.jarEvent.eventType == EventType.RecordEvent)
                 {
-                    //C'est la vie. Function for start/stopping camera recording goes here.
+                    RecordEventHandler(myJarObj.jarEvent);
                 }
                 break;
             default:
@@ -131,10 +148,77 @@ public class JarController : MonoBehaviour
         }
     }
 
+
+
     #region Helper Methods
-    
+
+    private void RecordEventHandler(JarEvent jarEvent)
+    {
+        //If recorderController is null, we need to set one up
+        if (_theRecorder == null)
+        {
+            SetupRecorder();
+        }
+
+        if (_theRecorder == null) return;//If this happens, we have a problem.
+        if (_theRecorder.IsRecording())
+        {
+            if (jarEvent.startRecording)
+            {
+                Debug.Log($"The recorder is already recording and a new jarEvent wants to Start Recording. Ignoring jarEvent. Event: {jarEvent.ToString()}");
+            }
+            else
+            {
+                _theRecorder.StopRecording();
+            }
+        }
+        else
+        {
+            if (jarEvent.startRecording)
+            {
+                _theRecorder.PrepareRecording();
+                _theRecorder.StartRecording();
+            }
+            else
+            {
+                Debug.Log($"The recorder is already stopped and a new jarEvent wants to Stop Recording. Ignoring jarEvent. Event: {jarEvent.ToString()}");
+            }
+        }
+    }
+
+    private void SetupRecorder()
+    {
+        var controllerSettings = ScriptableObject.CreateInstance<RecorderControllerSettings>();
+        _theRecorder = new RecorderController(controllerSettings);
+     
+        var videoRecorder = ScriptableObject.CreateInstance<MovieRecorderSettings>();
+        videoRecorder.name = "My Jar Recorder";
+        videoRecorder.Enabled = true;
+        videoRecorder.EncoderSettings = new CoreEncoderSettings()
+        {
+            Codec = CoreEncoderSettings.OutputCodec.MP4,
+            EncodingQuality = CoreEncoderSettings.VideoEncodingQuality.High
+        };
+     
+        videoRecorder.ImageInputSettings = new CameraInputSettings()
+        {
+            Source = ImageSource.MainCamera,
+            OutputWidth = 1280,
+            OutputHeight = 720
+        };
+     
+        videoRecorder.AudioInputSettings.PreserveAudio = true;
+        videoRecorder.OutputFile = recordingOutputPath + "JarRecording_" + DateTime.Now.ToString("s");
+        
+        controllerSettings.AddRecorderSettings(videoRecorder);
+        controllerSettings.SetRecordModeToManual();
+        controllerSettings.FrameRate = 30;
+     
+        RecorderOptions.VerboseMode = false;
+    }
     private void MoveCharacter(Transform charTransform, JarEvent moveParams)
     {
+        //C'est la vie. Maybe add Rotation to this as well. Just add 3 more fields to JarEvent
         charTransform.position = new Vector3(moveParams.movePosX, moveParams.movePosY, moveParams.movePosZ);
     }
     private void CameraHandler(Transform cameraFocus)
